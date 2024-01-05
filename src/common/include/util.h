@@ -123,6 +123,29 @@ class Op {
   std::string ClientId;
   int RequestId;  // 客户端号码请求的Request序列号，为了保证线性一致性
 
+ public:
+  std::string asString() const {
+    std::stringstream ss;
+    boost::archive::text_oarchive oa(ss);
+    oa << *this;
+    return ss.str();
+  }
+
+  bool parseFromString(std::string str) {
+    std::stringstream iss(str);
+    boost::archive::text_iarchive ia(iss);
+    ia >> *this;
+    return true;
+  }
+
+ public:
+  friend std::ostream& operator<<(std::ostream& os, const Op& obj) {
+    os << "[MyClass::Operator{" + obj.Operation + "}, Key{" + obj.Key +
+              "}, Value{" + obj.Value + "}, ClientId{" + obj.ClientId +
+              "}, RequestId{" + std::to_string(obj.RequestId) + "}]";
+    return os;
+  }
+
  private:
   friend class boost::serialization::access;
   template <typename Archive>
@@ -135,5 +158,13 @@ class Op {
     ar & RequestId;
   }
 };
+
+const std::string OK = "OK";
+const std::string ErrNoKey = "ErrNoKey";
+const std::string ErrWrongLeader = "ErrWrongLeader";
+
+bool isReleasePort(unsigned short usPort);
+
+bool getReleasePort(short& port);
 
 #endif  // !UTIL_H_
