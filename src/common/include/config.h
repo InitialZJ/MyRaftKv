@@ -3,7 +3,7 @@
 
 const bool Debug = true;
 
-const int debugMul = 1;
+const int debugMul = 1;  // MS
 const int HeartBeatTimeout = 25 * debugMul;
 const int ApplyInterval = 10 * debugMul;
 
