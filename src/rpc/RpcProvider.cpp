@@ -1,11 +1,17 @@
 #include "RpcProvider.h"
 
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <unistd.h>
+
+#include <cstring>
+#include <fstream>
 #include <functional>
 #include <iostream>
+#include <string>
 
-#include "MrpcApplication.h"
-#include "Zookeeperutil.h"
 #include "rpc_header.pb.h"
+#include "util.h"
 
 void RpcProvider::NotifyService(google::protobuf::Service* service) {
   const google::protobuf::ServiceDescriptor* service_ptr =
@@ -15,60 +21,64 @@ void RpcProvider::NotifyService(google::protobuf::Service* service) {
   int n = service_ptr->method_count();
   std::map<std::string, const google::protobuf::MethodDescriptor*> method_dic;
   // 遍历方法，进行存储
+  ServiceInfo sinfo;
   for (int i = 0; i < n; i++) {
     const google::protobuf::MethodDescriptor* method_ptr =
         service_ptr->method(i);
     const std::string method_name = method_ptr->name();
-    method_dic[method_name] = method_ptr;
+    sinfo.method_dic.insert({method_name, method_ptr});
   }
-  ServiceInfo sinfo;
   sinfo.service_ptr = service;
-  sinfo.method_dic = method_dic;
-  service_dic[service_name] = sinfo;
-
-  for (auto& item : service_dic) {
-    std::cout << "服务名：" << item.first << std::endl;
-    for (auto& item2 : item.second.method_dic) {
-      std::cout << "方法名：" << item2.first << std::endl;
-    }
-  }
+  service_dic.insert({service_name, sinfo});
 }
 
 // 启动rpc服务节点，开始提供rpc远程网络服务调用
-void RpcProvider::Run() {
-  MrpcConfig config_ins = MrpcApplication::GetInstance().getConfig();
-  std::string ip = config_ins.Load("rpcserverip");
-  uint16_t port = std::stoi(config_ins.Load("rpcserverport"));
+void RpcProvider::Run(int nodeIndex, short port) {
+  char* ipC;
+  char hname[128];
+  struct hostent* hent;
+  gethostname(hname, sizeof(hname));
+  hent = gethostbyname(hname);
+  for (int i = 0; hent->h_addr_list[i]; i++) {
+    ipC = inet_ntoa(*(struct in_addr*)(hent->h_addr_list[i]));
+  }
+  std::string ip = std::string(ipC);
+
+  std::string node = "node" + std::to_string(nodeIndex);
+  std::ofstream outfile;
+  outfile.open("test.conf", std::ios::app);  // 以追加模式写入文件
+  if (!outfile.is_open()) {
+    std::cout << "打开文件失败！" << std::endl;
+    exit(EXIT_FAILURE);
+  }
+  outfile << node << "ip=" << ip << std::endl;
+  outfile << node << "port=" << std::to_string(port) << std::endl;
+  outfile.close();
 
   muduo::net::InetAddress address(ip, port);
-  muduo::net::TcpServer server(&m_eventLoop, address, "RpcProvider");
+  m_muduo_server = std::make_shared<muduo::net::TcpServer>(
+      &m_eventLoop, address, "RpcProvider");
   // 绑定连接回调和消息读写回调方法，分离网络代码和业务代码
-  server.setConnectionCallback(
+  m_muduo_server->setConnectionCallback(
       std::bind(&RpcProvider::OnConnection, this, std::placeholders::_1));
-  server.setMessageCallback(
+  m_muduo_server->setMessageCallback(
       std::bind(&RpcProvider::OnMessage, this, std::placeholders::_1,
                 std::placeholders::_2, std::placeholders::_3));
-  server.setThreadNum(4);
-  std::cout << "Rpc start at ip: " << ip << " port: " << port << std::endl;
+  m_muduo_server->setThreadNum(4);
+  std::cout << "RpcProvider start server at ip: " << ip << " port: " << port
+            << std::endl;
 
-  Zookeeperutil zk;
-  zk.start();
-  std::string ip_port = ip + ":" + config_ins.Load("rpcserverport");
-  // 注册服务
-  for (auto& server : service_dic) {
-    std::string service_path = "/" + server.first;
-    zk.create(service_path, "", 0);
-    for (auto& func : server.second.method_dic) {
-      std::string func_path = service_path + "/" + func.first;
-      zk.create(func_path, ip_port, 0);
-    }
-  }
   // 启动网络服务
-  server.start();
+  m_muduo_server->start();
   m_eventLoop.loop();
 }
 
-void RpcProvider::OnConnection(const muduo::net::TcpConnectionPtr& conn) {}
+void RpcProvider::OnConnection(const muduo::net::TcpConnectionPtr& conn) {
+  // 如果是新连接就什么都不干，即正常的接收连接即可
+  if (!conn->connected()) {
+    conn->shutdown();
+  }
+}
 
 // 当有字节流时，会自动调用该函数
 // 当函数解析字符流时，调用相应注册的函数
@@ -139,5 +149,10 @@ void RpcProvider::callmeback(const muduo::net::TcpConnectionPtr& conn,
     return;
   }
   conn->send(response_str);
-  conn->shutdown();
+}
+
+RpcProvider::~RpcProvider() {
+  std::cout << "[func - RpcProvider::~RpcProvider()]: ip和port信息: "
+            << m_muduo_server->ipPort() << std::endl;
+  m_eventLoop.quit();
 }
