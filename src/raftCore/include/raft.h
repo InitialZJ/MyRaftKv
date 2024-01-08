@@ -86,13 +86,17 @@ class Raft : public raftRpcProctoc::raftRpc {
                      ::raftRpcProctoc::AppendEntriesReply* response,
                      google::protobuf::Closure* done) override;
   void InstallSnapshot(google::protobuf::RpcController* controller,
-                     const ::raftRpcProctoc::InstallSnapshotRequest* request,
-                     ::raftRpcProctoc::AppendEntriesReply* response,
-                     google::protobuf::Closure* done) override;
-  void AppendEntries(google::protobuf::RpcController* controller,
-                     const ::raftRpcProctoc::AppendEntriesArgs* request,
-                     ::raftRpcProctoc::AppendEntriesReply* response,
-                     google::protobuf::Closure* done) override;
+                       const ::raftRpcProctoc::InstallSnapshotRequest* request,
+                       ::raftRpcProctoc::InstallSnapshotResponse* response,
+                       google::protobuf::Closure* done) override;
+  void RequestVote(google::protobuf::RpcController* controller,
+                   const ::raftRpcProctoc::RequestVoteArgs* request,
+                   ::raftRpcProctoc::RequestVoteReply* response,
+                   google::protobuf::Closure* done) override;
+
+  void init(std::vector<std::shared_ptr<RaftRpcUtil>> peers, int me,
+            std::shared_ptr<Persister> persister,
+            std::shared_ptr<LockQueue<ApplyMsg>> applyCh);
 
  private:
   std::mutex m_mtx;
