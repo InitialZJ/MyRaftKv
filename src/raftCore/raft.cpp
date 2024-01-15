@@ -186,6 +186,63 @@ void Raft::doElection() {
   }
 }
 
+void Raft::doHeartBeat() {
+  std::lock_guard<std::mutex> g(m_mtx);
+
+  if (m_status == Leader) {
+    DPrintf("[func-Raft::doHeartBeat()-Leader: [%d]] Leader的心跳定时器触发了",
+            m_me);
+    auto appendNums = std::make_shared<int>(1);  // 正确返回的节点的数量
+
+    // 对Follower发送
+    for (int i = 0; i < m_peers.size(); i++) {
+      if (i == m_me) {
+        continue;
+      }
+      DPrintf(
+          "[func-Raft::doHeartBeat()-Leader: [%d]] Leader的心跳定时器出发了 "
+          "index: [%d]",
+          m_me, i);
+      myAssert(m_nextIndex[i] >= 1,
+               format("rf.nextIndex[%d] = [%d]", i, m_nextIndex[i]));
+      // 日志压缩加入之后要判断是发送快照还是AppendEntries
+      if (m_nextIndex[i] <= m_lastSnapshotIncludeIndex) {
+        std::thread t(&Raft::leaderSendSnapshot, this, i);
+        t.detach();
+        continue;
+      }
+
+      int prevLogIndex = -1, prevLogTerm = -1;
+      getPrevLogInfo(i, &prevLogIndex, &prevLogTerm);
+      std::shared_ptr<raftRpcProctoc::AppendEntriesArgs> appendEntriesArgs =
+          std::make_shared<raftRpcProctoc::AppendEntriesArgs>();
+      appendEntriesArgs->set_term(m_currentTerm);
+      appendEntriesArgs->set_leaderid(m_me);
+      appendEntriesArgs->set_prevlogindex(prevLogIndex);
+      appendEntriesArgs->set_prevlogterm(prevLogTerm);
+      appendEntriesArgs->clear_entries();
+      appendEntriesArgs->set_leadercommit(m_commitIndex);
+      if (prevLogIndex != m_lastSnapshotIncludeIndex) {
+        for (int j = getSlicesIndexFromLogIndex(prevLogIndex) + 1;
+             j < m_logs.size(); ++j) {
+          raftRpcProctoc::LogEntry* sendEntryPtr =
+              appendEntriesArgs->add_entries();
+          *sendEntryPtr = m_logs[j];
+        }
+      } else {
+        for (const auto& item : m_logs) {
+          raftRpcProctoc::LogEntry* sendEntryPtr =
+              appendEntriesArgs->add_entries();
+          *sendEntryPtr = item;
+        }
+      }
+
+      int lastLogIndex = getLastLogIndex();
+      myAssert(appendEntriesArgs->prevlogindex() + appendEntriesArgs->entries_size() == lastLogIndex, )
+    }
+  }
+}
+
 void Raft::getLastLogIndexAndTerm(int* lastLogIndex, int* lastLogTerm) {
   if (m_logs.empty()) {
     *lastLogIndex = m_lastSnapshotIncludeIndex;
