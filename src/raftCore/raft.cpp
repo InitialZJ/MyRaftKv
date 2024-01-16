@@ -632,4 +632,27 @@ bool Raft::sendRequestVote(
   return true;
 }
 
-bool Raft::sendAppendEntries(int server, std::shared_ptr<raftRpcProctoc::AppendEntriesArgs> args)
+bool Raft::sendAppendEntries(
+    int server, std::shared_ptr<raftRpcProctoc::AppendEntriesArgs> args,
+    std::shared_ptr<raftRpcProctoc::AppendEntriesReply> reply,
+    std::shared_ptr<int> appendNums) {
+  DPrintf(
+      "[func-Raft::sendAppendEntries-raft{%d}] leader 向节点{%d}发送AE rpc开始 "
+      "， args->entries_size():{%d}",
+      m_me, server, args->entries_size());
+  bool ok = m_peers[server]->AppendEntries(args.get(), reply.get());
+
+  if (!ok) {
+    DPrintf(
+        "[func-Raft::sendAppendEntries-raft{%d}] leader 向节点{%d}发送AE "
+        "rpc失败",
+        m_me, server);
+    return ok;
+  }
+  DPrintf(
+      "[func-Raft::sendAppendEntries-raft{%d}] leader 向节点{%d}发送AE rpc成功",
+      m_me, server);
+  if (reply->appstate() == Disconnected) {
+    return ok;
+  }
+}
