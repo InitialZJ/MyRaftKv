@@ -655,4 +655,5 @@ bool Raft::sendAppendEntries(
   if (reply->appstate() == Disconnected) {
     return ok;
   }
+  
 }
