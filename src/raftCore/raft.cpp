@@ -318,6 +318,140 @@ void Raft::getPrevLogInfo(int server, int* preIndex, int* preTerm) {
   *preTerm = m_logs[getSlicesIndexFromLogIndex(*preIndex)].logterm();
 }
 
+void Raft::GetState(int* term, bool* isLeader) {
+  m_mtx.lock();
+  Defer ec1([this]() -> void { m_mtx.unlock(); });
+  *term = m_currentTerm;
+  *isLeader = (m_status == Leader);
+}
+
+void Raft::InstallSnapshot(const raftRpcProctoc::InstallSnapshotRequest* args,
+                           raftRpcProctoc::InstallSnapshotResponse* reply) {
+  m_mtx.lock();
+  Defer ec1([this]() -> void { m_mtx.unlock(); });
+  if (args->term() < m_currentTerm) {
+    reply->set_term(m_currentTerm);
+    return;
+  }
+  if (args->term() > m_currentTerm) {
+    m_currentTerm = args->term();
+    m_votedFor = -1;
+    m_status = Follower;
+    persist();
+  }
+  m_status = Follower;
+  m_lastResetElectionTime = now();
+  if (args->lastsnapshotincludeindex() <= m_lastSnapshotIncludeIndex) {
+    return;
+  }
+  // 截断日志，修改commitIndex和lastApplied
+  int lastLogIndex = getLastLogIndex();
+  if (lastLogIndex > args->lastsnapshotincludeindex()) {
+    m_logs.erase(
+        m_logs.begin(),
+        m_logs.begin() +
+            getSlicesIndexFromLogIndex(args->lastsnapshotincludeindex()) + 1);
+
+  } else {
+    m_logs.clear();
+  }
+  m_commitIndex = std::max(m_commitIndex, args->lastsnapshotincludeindex());
+  m_lastApplied = std::max(m_lastApplied, args->lastsnapshotincludeindex());
+  m_lastSnapshotIncludeIndex = args->lastsnapshotincludeindex();
+  m_lastSnapshotIncludeTerm = args->lastsnapshotincludeterm();
+
+  reply->set_term(m_currentTerm);
+  ApplyMsg msg;
+  msg.SnapshotValid = true;
+  msg.Snapshot = args->data();
+  msg.SnapshotTerm = args->lastsnapshotincludeterm();
+  msg.SnapshotIndex = args->lastsnapshotincludeindex();
+
+  applyChan->Push(msg);
+  std::thread t(&Raft::pushMsgToKvServer, this, msg);
+  t.detach();
+  m_persister->Save(persistData(), args->data());
+}
+
+void Raft::pushMsgToKvServer(ApplyMsg msg) { applyChan->Push(msg); }
+
+void Raft::leaderHeartBeatTicker() {
+  while (true) {
+    auto nowTime = now();
+    m_mtx.lock();
+    auto suitableSleepTime = std::chrono::milliseconds(HeartBeatTimeout) +
+                             m_lastResetHeartBeatTime - nowTime;
+    m_mtx.unlock();
+    if (suitableSleepTime.count() < 1) {
+      suitableSleepTime = std::chrono::milliseconds(1);
+    }
+    std::this_thread::sleep_for(suitableSleepTime);
+    if ((m_lastResetHeartBeatTime - nowTime).count() > 0) {
+      continue;
+    }
+    doHeartBeat();
+  }
+}
+
+void Raft::leaderSendSnapshot(int server) {
+  m_mtx.lock();
+  raftRpcProctoc::InstallSnapshotRequest args;
+  args.set_leaderid(m_me);
+  args.set_term(m_currentTerm);
+  args.set_lastsnapshotincludeindex(m_lastSnapshotIncludeIndex);
+  args.set_lastsnapshotincludeterm(m_lastSnapshotIncludeTerm);
+  args.set_data(m_persister->ReadSnapshot());
+
+  raftRpcProctoc::InstallSnapshotResponse reply;
+  m_mtx.unlock();
+  bool ok = m_peers[server]->InstallSnapshot(&args, &reply);
+  m_mtx.lock();
+  Defer ec1([this]() -> void { this->m_mtx.unlock(); });
+  if (!ok) {
+    return;
+  }
+  if (m_status != Leader || m_currentTerm != args.term()) {
+    // 中间释放过锁，可能状态已经改变了
+    return;
+  }
+  // 无论什么时候都要判断term
+  if (reply.term() > m_currentTerm) {
+    // 三变
+    m_currentTerm = reply.term();
+    m_votedFor = -1;
+    m_status = Follower;
+    persist();
+    m_lastResetElectionTime = now();
+    return;
+  }
+  m_matchIndex[server] = args.lastsnapshotincludeindex();
+  m_nextIndex[server] = m_matchIndex[server] + 1;
+}
+
+void Raft::leaderUpdateCommitIndex() {
+  m_commitIndex = m_lastSnapshotIncludeIndex;
+  for (int index = getLastLogIndex(); index >= m_lastSnapshotIncludeIndex + 1;
+       index--) {
+    int sum = 0;
+    for (int i = 0; i < m_peers.size(); i++) {
+      if (i == m_me) {
+        sum += 1;
+        continue;
+      }
+      if (m_matchIndex[i] > index) {
+        sum += 1;
+      }
+    }
+
+    // 只有当前term有新提交的，才会更新commitIndex
+    if (sum >= m_peers.size() / 2 + 1 &&
+        getLogTermFromLogIndex(index) == m_currentTerm) {
+      m_commitIndex = index;
+      break;
+    }
+  }
+}
+
 void Raft::getLastLogIndexAndTerm(int* lastLogIndex, int* lastLogTerm) {
   if (m_logs.empty()) {
     *lastLogIndex = m_lastSnapshotIncludeIndex;
@@ -363,3 +497,139 @@ int Raft::getLogTermFromLogIndex(int logIndex) {
     return m_logs[getSlicesIndexFromLogIndex(logIndex)].logterm();
   }
 }
+
+void Raft::persist() {
+  auto data = persistData();
+  m_persister->SaveRaftState(data);
+}
+
+void Raft::RequestVote(const raftRpcProctoc::RequestVoteArgs* args,
+                       raftRpcProctoc::RequestVoteReply* reply) {
+  std::lock_guard<std::mutex> lg(m_mtx);
+  Defer ec1([this]() -> void {
+    // 应该先持久化，再撤销lock
+    this->persist();
+  });
+  // 对args的term的三种情况分别进行处理，大于小于等于自己的term都是不同的处理
+  // reason：出现网络分区，该竞选者已经OutOfDate
+  if (args->term() < m_currentTerm) {
+    reply->set_term(m_currentTerm);
+    reply->set_votestate(Expire);
+    reply->set_votegranted(false);
+    return;
+  }
+
+  if (args->term() > m_currentTerm) {
+    m_status = Follower;
+    m_currentTerm = args->term();
+    m_votedFor = -1;
+  }
+  myAssert(args->term() == m_currentTerm,
+           format("[func-rf[%d]] 前面校验过，这里却不不相等", m_me));
+  int lastLogIndex = getLastLogIndex();
+  if (!UpToDate(args->lastlogindex(), args->lastlogterm())) {
+    reply->set_term(m_currentTerm);
+    reply->set_votegranted(Voted);
+    reply->set_votegranted(false);
+    return;
+  }
+
+  if (m_votedFor != -1 && m_votedFor != args->candidateid()) {
+    // 已经投了其他人
+    reply->set_term(m_currentTerm);
+    reply->set_votestate(Voted);
+    reply->set_votegranted(false);
+    return;
+  } else {
+    m_votedFor = args->candidateid();
+    m_lastResetElectionTime = now();
+    reply->set_term(m_currentTerm);
+    reply->set_votestate(Normal);
+    reply->set_votegranted(true);
+    return;
+  }
+}
+
+bool Raft::UpToDate(int index, int term) {
+  int lastIndex = -1;
+  int lastTerm = -1;
+  getLastLogIndexAndTerm(&lastIndex, &lastTerm);
+  return term > lastTerm || (term == lastTerm && index >= lastIndex);
+}
+
+int Raft::GetRaftStateSize() { return m_persister->RaftStateSize(); }
+
+int Raft::getSlicesIndexFromLogIndex(int logIndex) {
+  myAssert(logIndex > m_lastSnapshotIncludeIndex,
+           format("[func-getSlicesIndexFromLogIndex-rf-[%d]] index [%d] <= "
+                  "rf.m_lastSnapshotIncludeIndex",
+                  m_me, logIndex, m_lastSnapshotIncludeIndex));
+  int lastLogIndex = getLastLogIndex();
+  myAssert(logIndex <= lastLogIndex,
+           format("[func-getSliceIndexFromLogIndex-rf{%d}]  logIndex{%d} > "
+                  "lastLogIndex{%d}",
+                  m_me, logIndex, lastLogIndex));
+  int SliceIndex = logIndex - m_lastSnapshotIncludeIndex - 1;
+  return SliceIndex;
+}
+
+bool Raft::sendRequestVote(
+    int server, std::shared_ptr<raftRpcProctoc::RequestVoteArgs> args,
+    std::shared_ptr<raftRpcProctoc::RequestVoteReply> reply,
+    std::shared_ptr<int> votedNum) {
+  auto start = now();
+  DPrintf("[func-sendRequestVote rf{%d}] 向server{%d} 发送 RequestVote 开始",
+          m_me, m_currentTerm, getLastLogIndex());
+  bool ok = m_peers[server]->RequestVote(args.get(), reply.get());
+  DPrintf(
+      "[func-sendRequestVote rf{%d}] 向server{%d} 发送 RequestVote "
+      "完毕，耗时:{%d} ms",
+      m_me, m_currentTerm, getLastLogIndex(), now() - start);
+  if (!ok) {
+    return ok;
+  }
+
+  std::lock_guard<std::mutex> lg(m_mtx);
+  if (reply->term() > m_currentTerm) {
+    m_status = Follower;
+    m_currentTerm = reply->term();
+    m_votedFor = -1;
+    persist();
+    return true;
+  } else if (reply->term() < m_currentTerm) {
+    return true;
+  }
+  myAssert(reply->term() == m_currentTerm,
+           format("assert {reply.Term==rf.currentTerm} fail"));
+
+  if (!reply->votegranted()) {
+    return true;
+  }
+
+  *votedNum = *votedNum + 1;
+  if (*votedNum >= m_peers.size() / 2 + 1) {
+    // 变成Leader
+    *votedNum = 0;
+    if (m_status == Leader) {
+      myAssert(false, format("[func-sendRequestVote-rf{%d}]  term:{%d} "
+                             "同一个term当两次领导，error",
+                             m_me, m_currentTerm));
+    }
+    m_status = Leader;
+    DPrintf(
+        "[func-sendRequestVote rf{%d}] elect success  ,current term:{%d} "
+        ",lastLogIndex:{%d}\n",
+        m_me, m_currentTerm, getLastLogIndex());
+    int lastLogIndex = getLastLogIndex();
+    for (int i = 0; i < m_nextIndex.size(); i++) {
+      m_nextIndex[i] = lastLogIndex + 1;
+      m_matchIndex[i] = 0;
+    }
+    std::thread t(&Raft::doHeartBeat, this);
+    t.detach();
+    persist();
+  }
+  return true;
+}
+
+bool Raft::sendAppendEntries(int server, std::shared_ptr<raftRpcProctoc::AppendEntriesArgs> args)

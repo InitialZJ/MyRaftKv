@@ -46,7 +46,7 @@ class Raft : public raftRpcProctoc::raftRpc {
   std::vector<ApplyMsg> getApplyLogs();
   int getNewCommandIndex();
   void getPrevLogInfo(int server, int* prevIndex, int* preTerm);
-  int GetState(int* term, bool* isLeader);
+  void GetState(int* term, bool* isLeader);
   void InstallSnapshot(const raftRpcProctoc::InstallSnapshotRequest* args,
                        raftRpcProctoc::InstallSnapshotResponse* reply);
   void leaderHeartBeatTicker();
@@ -103,15 +103,20 @@ class Raft : public raftRpcProctoc::raftRpc {
   std::vector<std::shared_ptr<RaftRpcUtil>> m_peers;
   std::shared_ptr<Persister> m_persister;
   int m_me;
+  // 见过的最新的任期
   int m_currentTerm;
+  // 当前任期中投票给谁
   int m_votedFor;
-  std::vector<raftRpcProctoc::LogEntry>
-      m_logs;  // 日志条目数组，包含了状态机要执行的指令集，Leader任期号，日志编号
+  // 日志条目数组，包含了状态机要执行的指令集，Leader任期号，日志编号
+  std::vector<raftRpcProctoc::LogEntry> m_logs;
+  // 将要被提交的最大的下标
   int m_commitIndex;
-  int m_lastApplied;  // 已经汇报给状态机（上层应用）的log的index
+  // 已经汇报给状态机（上层应用）的log的index
+  int m_lastApplied;
 
-  // 以下两个vector下标从1开始
+  // 对于每个服务器，下一条要被发送过来的日志的下标
   std::vector<int> m_nextIndex;
+  // 对于每个服务器，已知的要在服务器上复制的最高日志条目的下标
   std::vector<int> m_matchIndex;
   enum Status { Follower, Candidate, Leader };
 
