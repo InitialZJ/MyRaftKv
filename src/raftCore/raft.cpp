@@ -238,9 +238,84 @@ void Raft::doHeartBeat() {
       }
 
       int lastLogIndex = getLastLogIndex();
-      myAssert(appendEntriesArgs->prevlogindex() + appendEntriesArgs->entries_size() == lastLogIndex, )
+      // Leader对每个节点发送的日志长短不一，但是都保证从prevIndex发送直到最后
+      myAssert(appendEntriesArgs->prevlogindex() +
+                       appendEntriesArgs->entries_size() ==
+                   lastLogIndex,
+               format("appendEntriesArgs.PrevLogIndex[%d]+len("
+                      "appendEntriesArgs.Entries)[%d] != lastLogIndex[%d]",
+                      appendEntriesArgs->prevlogindex(),
+                      appendEntriesArgs->entries_size(), lastLogIndex));
+      // 构造返回值
+      const std::shared_ptr<raftRpcProctoc::AppendEntriesReply>
+          appendEntriesReply =
+              std::make_shared<raftRpcProctoc::AppendEntriesReply>();
+      appendEntriesReply->set_appstate(Disconnected);
+
+      std::thread t(&Raft::sendAppendEntries, this, i, appendEntriesArgs,
+                    appendEntriesReply, appendNums);
+      t.detach();
     }
+    m_lastResetHeartBeatTime = now();
   }
+}
+
+void Raft::electionTimeOutTicker() {
+  while (true) {
+    m_mtx.lock();
+    auto nowTime = now();
+    auto suitableSleepTime =
+        getRandomizedElectionTimeout() + m_lastResetElectionTime - now();
+    if (suitableSleepTime.count() > 1) {
+      std::this_thread::sleep_for(suitableSleepTime);
+    }
+    if ((m_lastResetElectionTime - nowTime).count() > 0) {
+      // 说明睡眠的这段时间有重置定时器，那么就开启新计时
+      continue;
+    }
+    doElection();
+  }
+}
+
+std::vector<ApplyMsg> Raft::getApplyLogs() {
+  std::vector<ApplyMsg> applyMsgs;
+  myAssert(
+      m_commitIndex <= getLastLogIndex(),
+      format(
+          "[func-getApplyLogs-rf-[%d]] commitIndex [%d] > getLastLogIndex [%d]",
+          m_me, m_commitIndex, getLastLogIndex()));
+  while (m_lastApplied < m_commitIndex) {
+    m_lastApplied++;
+    myAssert(
+        m_logs[getSlicesIndexFromLogIndex(m_lastApplied)].logindex() ==
+            m_lastApplied,
+        format("rf.logs[rf.getSlicesIndexFromLogIndex(rf.lastApplied)]."
+               "logindxe [%d] != rf.lastApplied [%d] ",
+               m_logs[getSlicesIndexFromLogIndex(m_lastApplied)].logindex(),
+               m_lastApplied));
+    ApplyMsg applyMsg;
+    applyMsg.CommandValid = true;
+    applyMsg.SnapshotValid = false;
+    applyMsg.Command =
+        m_logs[getSlicesIndexFromLogIndex(m_lastApplied)].command();
+    applyMsg.CommandIndex = m_lastApplied;
+    applyMsgs.emplace_back(applyMsg);
+  }
+  return applyMsgs;
+}
+
+// 新命令应该分配的index
+int Raft::getNewCommandIndex() { return getLastLogIndex() + 1; }
+
+void Raft::getPrevLogInfo(int server, int* preIndex, int* preTerm) {
+  if (m_nextIndex[server] == m_lastSnapshotIncludeIndex + 1) {
+    *preIndex = m_lastSnapshotIncludeIndex;
+    *preTerm = m_lastSnapshotIncludeTerm;
+    return;
+  }
+  auto nextIndex = m_nextIndex[server];
+  *preIndex = nextIndex - 1;
+  *preTerm = m_logs[getSlicesIndexFromLogIndex(*preIndex)].logterm();
 }
 
 void Raft::getLastLogIndexAndTerm(int* lastLogIndex, int* lastLogTerm) {
