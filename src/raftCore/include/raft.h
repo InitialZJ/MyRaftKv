@@ -115,7 +115,8 @@ class Raft : public raftRpcProctoc::raftRpc {
   int m_lastApplied;
 
   // Leader 才会持有的易失性状态信息（会在每次选举完成后初始化）
-  // 每个节点即将为其发送的下一个日志记录的 index（初值均为 Leader 最新日志记录 index 值 + 1）
+  // 每个节点即将为其发送的下一个日志记录的 index（初值均为 Leader 最新日志记录
+  // index 值 + 1）
   std::vector<int> m_nextIndex;
   // 每个节点上已备份的最后一条日志记录的 index（初值均为 0）
   std::vector<int> m_matchIndex;
