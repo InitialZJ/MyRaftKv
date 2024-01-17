@@ -103,20 +103,21 @@ class Raft : public raftRpcProctoc::raftRpc {
   std::vector<std::shared_ptr<RaftRpcUtil>> m_peers;
   std::shared_ptr<Persister> m_persister;
   int m_me;
-  // 见过的最新的任期
+  // 当前 Term ID（初值为 0）
   int m_currentTerm;
-  // 当前任期中投票给谁
+  // 该 Term 中已接收到来自该节点的选票的 Candidate ID
   int m_votedFor;
-  // 日志条目数组，包含了状态机要执行的指令集，Leader任期号，日志编号
+  // 日志记录。第一个日志记录的 index 值为 1
   std::vector<raftRpcProctoc::LogEntry> m_logs;
-  // 将要被提交的最大的下标
+  // 最后一个已提交日志记录的 index（初值为 0）
   int m_commitIndex;
-  // 已经汇报给状态机（上层应用）的log的index
+  // 最后一个已应用至上层状态机的日志记录的 index（初值为 0）
   int m_lastApplied;
 
-  // 对于每个服务器，下一条要被发送过来的日志的下标
+  // Leader 才会持有的易失性状态信息（会在每次选举完成后初始化）
+  // 每个节点即将为其发送的下一个日志记录的 index（初值均为 Leader 最新日志记录 index 值 + 1）
   std::vector<int> m_nextIndex;
-  // 对于每个服务器，已知的要在服务器上复制的最高日志条目的下标
+  // 每个节点上已备份的最后一条日志记录的 index（初值均为 0）
   std::vector<int> m_matchIndex;
   enum Status { Follower, Candidate, Leader };
 
@@ -152,7 +153,7 @@ class Raft : public raftRpcProctoc::raftRpc {
     int m_lastSnapshotIncludeIndex;
     int m_lastSnapshotIncludeTerm;
     std::vector<std::string> m_logs;
-    std::unordered_map<std::string, int> umap;
+    // std::unordered_map<std::string, int> umap;
   };
 };
 
