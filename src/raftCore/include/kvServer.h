@@ -102,7 +102,7 @@ class KvServer : raftKVRpcProctoc::kvServerRpc {
     m_serializedKVData.clear();
   }
 
-  void parseFromString(const str::stirng& str) {
+  void parseFromString(const std::string& str) {
     std::stringstream ss(str);
     boost::archive::text_iarchive ia(ss);
     ia >> *this;
