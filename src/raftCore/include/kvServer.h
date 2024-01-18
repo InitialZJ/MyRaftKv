@@ -40,7 +40,7 @@ class KvServer : raftKVRpcProctoc::kvServerRpc {
  public:
   KvServer(int me, int maxraftstate, std::string nodeInforFileName, short port);
 
-  void StartKVServer();
+  // void StartKVServer();
 
   void DprintfKVDB();
 

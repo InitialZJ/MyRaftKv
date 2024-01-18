@@ -6,7 +6,6 @@
 int main() {
   Clerk client;
   client.Init("test.conf");
-  auto start = now();
   int count = 500;
   int tmp = count;
   while (tmp--) {

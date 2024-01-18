@@ -63,7 +63,7 @@ void Clerk::PutAppend(std::string key, std::string value, std::string op) {
       if (reply.err() == ErrWrongLeader) {
         DPrintf("重试原因：非leader");
       }
-      server = (server + 1) & m_servers.size();
+      server = (server + 1) % m_servers.size();
       continue;
     }
     if (reply.err() == OK) {
