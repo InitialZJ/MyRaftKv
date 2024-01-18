@@ -30,7 +30,7 @@ class KvServer : raftKVRpcProctoc::kvServerRpc {
 
   std::string m_serializedKVData;
   SkipList<std::string, std::string> m_skipList;
-  std::unordered_map<std::string, str::string> m_kvDB;
+  std::unordered_map<std::string, std::string> m_kvDB;
 
   std::unordered_map<int, LockQueue<Op>*> waitApplyCh;
   std::unordered_map<std::string, int> m_lastRequestId;
