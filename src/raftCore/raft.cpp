@@ -536,7 +536,7 @@ void Raft::RequestVote(const raftRpcProctoc::RequestVoteArgs* args,
     m_votedFor = -1;
   }
   myAssert(args->term() == m_currentTerm,
-           format("[func-rf[%d]] 前面校验过，这里却不不相等", m_me));
+           format("[func-rf[%d]] 前面校验过，这里却不相等", m_me));
   int lastLogIndex = getLastLogIndex();
   if (!UpToDate(args->lastlogindex(), args->lastlogterm())) {
     reply->set_term(m_currentTerm);
@@ -592,12 +592,12 @@ bool Raft::sendRequestVote(
     std::shared_ptr<int> votedNum) {
   auto start = now();
   DPrintf("[func-sendRequestVote rf{%d}] 向server{%d} 发送 RequestVote 开始",
-          m_me, m_currentTerm, getLastLogIndex());
+          m_me, server);
   bool ok = m_peers[server]->RequestVote(args.get(), reply.get());
   DPrintf(
       "[func-sendRequestVote rf{%d}] 向server{%d} 发送 RequestVote "
       "完毕，耗时:{%d} ms",
-      m_me, m_currentTerm, getLastLogIndex(), now() - start);
+      m_me, server, now() - start);
   if (!ok) {
     return ok;
   }
@@ -610,6 +610,7 @@ bool Raft::sendRequestVote(
     persist();
     return true;
   } else if (reply->term() < m_currentTerm) {
+    // 应该不会出现吧
     return true;
   }
   myAssert(reply->term() == m_currentTerm,

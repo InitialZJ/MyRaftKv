@@ -361,9 +361,9 @@ KvServer::KvServer(int me, int maxraftstate, std::string nodeInforFilename,
     short otherNodePort = ipPortVt[i].second;
     auto* rpc = new RaftRpcUtil(otherNodeIp, otherNodePort);
     servers.push_back(std::shared_ptr<RaftRpcUtil>(rpc));
-    std::cout << "node" << m_me << " 连接node" << i << "success!" << std::endl;
+    std::cout << "node: " << m_me << "连接node" << i << "success!" << std::endl;
   }
-  sleep(ipPortVt.size() - me);
+  sleep(ipPortVt.size() - m_me);
   // kv的server直接与raft通信，但kv不直接与raft通信，所以需要把applyChan传递下去用于通信，两者的persister也是共用的
   m_raftNode->init(servers, m_me, persister, applyChan);
 
