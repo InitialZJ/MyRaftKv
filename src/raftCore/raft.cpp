@@ -126,7 +126,8 @@ void Raft::AppendEntries1(const raftRpcProctoc::AppendEntriesArgs* args,
   }
 }
 
-// TODO: 这个是干嘛的
+// 从已经commit的日志中，取出未执行的
+// logs -> applyChan
 void Raft::applierTicker() {
   while (true) {
     m_mtx.lock();
@@ -136,6 +137,7 @@ void Raft::applierTicker() {
           "m_commitIndex [%d]",
           m_me, m_lastApplied, m_commitIndex);
     }
+    // TODO: m_commitIndex是什么时候更新的
     auto applyMsgs = getApplyLogs();
     m_mtx.unlock();
 
@@ -377,6 +379,7 @@ void Raft::InstallSnapshot(const raftRpcProctoc::InstallSnapshotRequest* args,
   msg.SnapshotIndex = args->lastsnapshotincludeindex();
 
   applyChan->Push(msg);
+  // TODO: 为什么要push两次
   std::thread t(&Raft::pushMsgToKvServer, this, msg);
   t.detach();
   m_persister->Save(persistData(), args->data());
@@ -668,7 +671,6 @@ bool Raft::sendAppendEntries(
       "[func-Raft::sendAppendEntries-raft{%d}] leader 向节点{%d}发送AE rpc成功",
       m_me, server);
   if (reply->appstate() == Disconnected) {
-    // TODO: 什么情况下会进入这里
     return ok;
   }
   std::lock_guard<std::mutex> lg1(m_mtx);
@@ -688,7 +690,6 @@ bool Raft::sendAppendEntries(
   }
 
   if (m_status != Leader) {
-    // TODO: 不是Leader怎么进到这里？
     return ok;
   }
 

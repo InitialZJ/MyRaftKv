@@ -113,7 +113,6 @@ void KvServer::Get(const raftKVRpcProctoc::GetArgs* args,
   m_mtx.unlock();
 }
 
-// TODO: 这个函数是干嘛的
 void KvServer::GetCommandFromRaft(ApplyMsg message) {
   Op op;
   op.parseFromString(message.Command);
@@ -191,10 +190,8 @@ void KvServer::PutAppend(const raftKVRpcProctoc::PutAppendArgs* args,
         "Opreation %s Key :%s, Value :%s",
         m_me, m_me, raftIndex, &op.ClientId, op.RequestId, &op.Operation,
         &op.Key, &op.Value);
+    // 判断RequestId是否过时
     if (ifRequestDuplicate(op.ClientId, op.RequestId)) {
-      // TODO: 为什么会重复
-      // 超时了，但是是重复的请求，返回ok
-      // 实际上就算没有超时，在真正执行的时候也要判断是否重复
       reply->set_err(OK);
     } else {
       reply->set_err(ErrWrongLeader);
@@ -209,7 +206,6 @@ void KvServer::PutAppend(const raftKVRpcProctoc::PutAppendArgs* args,
         &op.Key, &op.Value);
     if (raftCommitOp.ClientId == op.ClientId &&
         raftCommitOp.RequestId == op.RequestId) {
-      // TODO: 啥意思
       // 可能发生leader的变更导致日志被覆盖，因此需要检查
       reply->set_err(OK);
     } else {
@@ -224,6 +220,7 @@ void KvServer::PutAppend(const raftKVRpcProctoc::PutAppendArgs* args,
   m_mtx.unlock();
 }
 
+// 从raft中将command放入waitApplyCh
 void KvServer::ReadRaftApplyCommandLoop() {
   while (true) {
     // 如果只操作applyChan不用拿锁，因为applyChan自己带锁
@@ -315,7 +312,6 @@ KvServer::KvServer(int me, int maxraftstate, std::string nodeInforFilename,
     : m_skipList(6) {
   std::shared_ptr<Persister> persister = std::make_shared<Persister>(me);
   m_me = me;
-  // TODO: 这个变量是干嘛的
   m_maxRaftState = maxraftstate;
   applyChan = std::make_shared<LockQueue<ApplyMsg>>();
   m_raftNode = std::make_shared<Raft>();

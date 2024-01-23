@@ -69,8 +69,8 @@ std::string Persister::ReadRaftState() {
     return "";
   }
 
-  std::string snapshot;
-  ifs >> snapshot;
+  std::string state;
+  ifs >> state;
   ifs.close();
-  return snapshot;
+  return state;
 }

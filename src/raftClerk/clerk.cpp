@@ -24,7 +24,6 @@ std::string Clerk::Get(std::string key) {
     raftKVRpcProctoc::GetReply reply;
     bool ok = m_servers[server]->Get(&args, &reply);
     if (!ok || reply.err() == ErrWrongLeader) {
-      // TODO: 重试，一致性？啥玩意？
       server = (server + 1) % m_servers.size();
       continue;
     }
