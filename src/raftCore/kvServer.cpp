@@ -8,7 +8,7 @@ void KvServer::DprintfKVDB() {
     return;
   }
   std::lock_guard<std::mutex> lg(m_mtx);
-  Defer ec1([this]() -> void { m_skipList.display_list(); });
+  DEFER { m_skipList.display_list(); };
 }
 
 void KvServer::ExecuteAppendOpOnKVDB(Op op) {

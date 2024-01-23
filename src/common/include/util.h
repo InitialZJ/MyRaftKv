@@ -19,14 +19,25 @@
 
 #include "config.h"
 
-class Defer final {
+template <typename F>
+class DeferClass {
  public:
-  explicit Defer(std::function<void()> fun) : m_funCall(fun) {}
-  ~Defer() { m_funCall(); }
+  DeferClass(F&& f) : m_func(std::forwawrd<F>(f)) {}
+  DeferClass(const F& f) : m_func(f) {}
+  ~DeferClass() { m_func(); }
+
+  DeferClass(const DeferClass& e) = delete;
+  DeferClass& operator=(const DeferClass& e) = delete;
 
  private:
-  std::function<void()> m_funCall;
+  F m_func;
 };
+
+#define _CONCAT(a, b) a##b
+#define _MAKE_DEFER_(line) DeferClass _CONCAT(defer_placeholder, line) = [&]()
+
+#undef DEFER
+#define DEFER _MAKE_DEFER_(__LINE__)
 
 void DPrintf(const char* format, ...);
 

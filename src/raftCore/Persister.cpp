@@ -41,7 +41,7 @@ std::string Persister::ReadSnapshot() {
     m_snapshotOutStream.close();
   }
   // 销毁的时候调用lambda表达式
-  Defer ec1([this]() -> void { this->m_snapshotOutStream.open(snapshotFile); });
+  DEFER { m_snapshotOutStream.open(snapshotFile); };
   std::fstream ifs(snapshotFile, std::ios_base::in);
   if (!ifs.good()) {
     return "";

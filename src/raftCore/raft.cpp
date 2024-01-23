@@ -22,7 +22,7 @@ void Raft::AppendEntries1(const raftRpcProctoc::AppendEntriesArgs* args,
     return;  // 从过期的Leader收到消息不需要重设定时器
   }
 
-  Defer ec1([this]() -> void { this->persist(); });
+  DEFER { persist(); };
   if (args->term() > m_currentTerm) {
     // 正常情况，更改为Follower
     // DPrintf(
@@ -331,7 +331,7 @@ void Raft::getPrevLogInfo(int server, int* preIndex, int* preTerm) {
 
 void Raft::GetState(int* term, bool* isLeader) {
   m_mtx.lock();
-  Defer ec1([this]() -> void { m_mtx.unlock(); });
+  DEFER { m_mtx.unlock(); };
   *term = m_currentTerm;
   *isLeader = (m_status == Leader);
 }
@@ -339,7 +339,7 @@ void Raft::GetState(int* term, bool* isLeader) {
 void Raft::InstallSnapshot(const raftRpcProctoc::InstallSnapshotRequest* args,
                            raftRpcProctoc::InstallSnapshotResponse* reply) {
   m_mtx.lock();
-  Defer ec1([this]() -> void { m_mtx.unlock(); });
+  DEFER { m_mtx.unlock(); };
   if (args->term() < m_currentTerm) {
     reply->set_term(m_currentTerm);
     return;
@@ -418,7 +418,7 @@ void Raft::leaderSendSnapshot(int server) {
   m_mtx.unlock();
   bool ok = m_peers[server]->InstallSnapshot(&args, &reply);
   m_mtx.lock();
-  Defer ec1([this]() -> void { this->m_mtx.unlock(); });
+  DEFER { m_mtx.unlock(); };
   if (!ok) {
     return;
   }
@@ -518,10 +518,10 @@ void Raft::persist() {
 void Raft::RequestVote(const raftRpcProctoc::RequestVoteArgs* args,
                        raftRpcProctoc::RequestVoteReply* reply) {
   std::lock_guard<std::mutex> lg(m_mtx);
-  Defer ec1([this]() -> void {
+  DEFER {
     // 应该先持久化，再撤销lock
-    this->persist();
-  });
+    persist();
+  };
 
   // 对args的term的三种情况分别进行处理，大于小于等于自己的term都是不同的处理
   // reason：出现网络分区，该竞选者已经OutOfDate
