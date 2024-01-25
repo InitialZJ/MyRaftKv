@@ -137,7 +137,6 @@ void Raft::applierTicker() {
           "m_commitIndex [%d]",
           m_me, m_lastApplied, m_commitIndex);
     }
-    // TODO: m_commitIndex是什么时候更新的
     auto applyMsgs = getApplyLogs();
     m_mtx.unlock();
 
@@ -275,6 +274,7 @@ void Raft::electionTimeOutTicker() {
     auto nowTime = now();
     auto suitableSleepTime =
         getRandomizedElectionTimeout() + m_lastResetElectionTime - now();
+    m_mtx.unlock();
     if (suitableSleepTime.count() > 1) {
       std::this_thread::sleep_for(suitableSleepTime);
     }
@@ -379,7 +379,6 @@ void Raft::InstallSnapshot(const raftRpcProctoc::InstallSnapshotRequest* args,
   msg.SnapshotIndex = args->lastsnapshotincludeindex();
 
   applyChan->Push(msg);
-  // TODO: 为什么要push两次
   std::thread t(&Raft::pushMsgToKvServer, this, msg);
   t.detach();
   m_persister->Save(persistData(), args->data());
@@ -438,30 +437,6 @@ void Raft::leaderSendSnapshot(int server) {
   }
   m_matchIndex[server] = args.lastsnapshotincludeindex();
   m_nextIndex[server] = m_matchIndex[server] + 1;
-}
-
-void Raft::leaderUpdateCommitIndex() {
-  m_commitIndex = m_lastSnapshotIncludeIndex;
-  for (int index = getLastLogIndex(); index >= m_lastSnapshotIncludeIndex + 1;
-       index--) {
-    int sum = 0;
-    for (int i = 0; i < m_peers.size(); i++) {
-      if (i == m_me) {
-        sum += 1;
-        continue;
-      }
-      if (m_matchIndex[i] > index) {
-        sum += 1;
-      }
-    }
-
-    // 只有当前term有新提交的，才会更新commitIndex
-    if (sum >= m_peers.size() / 2 + 1 &&
-        getLogTermFromLogIndex(index) == m_currentTerm) {
-      m_commitIndex = index;
-      break;
-    }
-  }
 }
 
 void Raft::getLastLogIndexAndTerm(int* lastLogIndex, int* lastLogTerm) {
@@ -600,7 +575,7 @@ bool Raft::sendRequestVote(
   DPrintf(
       "[func-sendRequestVote rf{%d}] 向server{%d} 发送 RequestVote "
       "完毕，耗时:{%d} ms",
-      m_me, server, now() - start);
+      m_me, server, (now() - start).count() * 1000);
   if (!ok) {
     return ok;
   }
@@ -634,8 +609,8 @@ bool Raft::sendRequestVote(
     }
     m_status = Leader;
     DPrintf(
-        "[func-sendRequestVote rf{%d}] elect success  ,current term:{%d} "
-        ",lastLogIndex:{%d}\n",
+        "[func-sendRequestVote rf{%d}] elect success, current term:{%d}, "
+        "lastLogIndex:{%d}",
         m_me, m_currentTerm, getLastLogIndex());
     int lastLogIndex = getLastLogIndex();
     for (int i = 0; i < m_nextIndex.size(); i++) {
@@ -654,8 +629,8 @@ bool Raft::sendAppendEntries(
     std::shared_ptr<raftRpcProctoc::AppendEntriesReply> reply,
     std::shared_ptr<int> appendNums) {
   DPrintf(
-      "[func-Raft::sendAppendEntries-raft{%d}] leader 向节点{%d}发送AE rpc开始 "
-      "， args->entries_size():{%d}",
+      "[func-Raft::sendAppendEntries-raft{%d}] leader 向节点{%d}发送AE "
+      "rpc开始，args->entries_size():{%d}",
       m_me, server, args->entries_size());
   // ok是网络是否正常的ok，不是是否投票
   bool ok = m_peers[server]->AppendEntries(args.get(), reply.get());
@@ -787,8 +762,8 @@ void Raft::Start(Op command, int* newLogIndex, int* newLogTerm,
 
   int lastLogIndex = getLastLogIndex();
   // leader应该不停的向各个Follower发送AE来维护心跳和保持日志同步，目前的做法是新的命令来了不会直接执行，而是等待leader的心跳触发
-  DPrintf("[func-Start-rf{%d}]  lastLogIndex:%d,command:%s\n", m_me,
-          lastLogIndex, &command);
+  DPrintf("[func-Start-rf{%d}] lastLogIndex:%d, ", m_me, lastLogIndex);
+  std::cout << "command: " << command << std::endl;
   persist();
   *newLogIndex = newLogEntry.logindex();
   *newLogTerm = newLogEntry.logterm();

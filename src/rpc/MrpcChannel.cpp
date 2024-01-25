@@ -112,7 +112,7 @@ bool MrpcChannel::newConnect(const char* ip, uint16_t port,
     sprintf(errtxt, "recv error! errno: %d", errno);
     m_clientFd = -1;
     *errMsg = errtxt;
-    return;
+    return false;
   }
 
   struct sockaddr_in server_addr;

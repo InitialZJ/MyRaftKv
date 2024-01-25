@@ -22,7 +22,7 @@
 template <typename F>
 class DeferClass {
  public:
-  DeferClass(F&& f) : m_func(std::forwawrd<F>(f)) {}
+  DeferClass(F&& f) : m_func(std::forward<F>(f)) {}
   DeferClass(const F& f) : m_func(f) {}
   ~DeferClass() { m_func(); }
 

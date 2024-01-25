@@ -13,6 +13,7 @@ class RaftRpcUtil {
                    raftRpcProctoc::RequestVoteReply* response);
 
   RaftRpcUtil(std::string ip, short port);
+  ~RaftRpcUtil();
 
  private:
   raftRpcProctoc::raftRpc_Stub* stub_;

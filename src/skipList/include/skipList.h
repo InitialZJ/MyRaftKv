@@ -181,8 +181,9 @@ void SkipList<K, V>::display_list() {
       std::cout << node->get_key() << ": " << node->get_value() << ";";
       node = node->forward[i];
     }
-    std::cout << endl;
+    std::cout << std::endl;
   }
+  std::cout << "***** Skip List*****\n\n";
 }
 
 template <typename K, typename V>
@@ -195,7 +196,7 @@ std::string SkipList<K, V>::dump_file() {
   }
   std::stringstream ss;
   boost::archive::text_oarchive oa(ss);
-  os << dumper;
+  oa << dumper;
   return ss.str();
 }
 
@@ -289,7 +290,7 @@ template <typename K, typename V>
 bool SkipList<K, V>::search_element(K key, V &value) {
   Node<K, V> *current = _header;
   for (int i = _skip_list_level; i >= 0; i--) {
-    while (cur->forward[i] && current->forward[i]->get_key() < key) {
+    while (current->forward[i] && current->forward[i]->get_key() < key) {
       current = current->forward[i];
     }
   }

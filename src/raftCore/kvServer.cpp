@@ -75,7 +75,6 @@ void KvServer::Get(const raftKVRpcProctoc::GetArgs* args,
       // 如果超时，代表raft集群不保证已经commmit该日志，但是如果是已经提交过的get请求，是可以再执行的，不会违反线性一致性
       std::string value;
       bool exist = false;
-      // TODO: 这个执行怎么跟上面的不一样
       ExecuteGetOpOnKVDB(op, &value, &exist);
       if (exist) {
         reply->set_err(OK);
@@ -117,11 +116,11 @@ void KvServer::GetCommandFromRaft(ApplyMsg message) {
   Op op;
   op.parseFromString(message.Command);
   DPrintf(
-      "[KvServer::GetCommandFromRaft-kvserver{%d}] , Got Command --> "
+      "[KvServer::GetCommandFromRaft-kvserver{%d}], Got Command --> "
       "Index:{%d} , ClientId {%s}, RequestId {%d}, Opreation {%s}, Key :{%s}, "
       "Value :{%s}",
-      m_me, message.CommandIndex, &op.ClientId, op.RequestId, &op.Operation,
-      &op.Key, &op.Value);
+      m_me, message.CommandIndex, op.ClientId.c_str(), op.RequestId,
+      op.Operation.c_str(), op.Key.c_str(), op.Value.c_str());
   if (message.CommandIndex <= m_lastSnapShotRaftLogIndex) {
     return;
   }
@@ -166,15 +165,18 @@ void KvServer::PutAppend(const raftKVRpcProctoc::PutAppendArgs* args,
     DPrintf(
         "[func -KvServer::PutAppend -kvserver{%d}]From Client %s (Request %d) "
         "To Server %d, key %s, raftIndex %d , but not leader",
-        m_me, &args->clientid(), args->requestid(), m_me, &op.Key, raftIndex);
+        m_me, args->clientid().c_str(), args->requestid(), m_me, op.Key.c_str(),
+        raftIndex);
 
     reply->set_err(ErrWrongLeader);
     return;
   }
   DPrintf(
-      "[func -KvServer::PutAppend -kvserver{%d}]From Client %s (Request %d) To "
-      "Server %d, key %s, raftIndex %d , is leader ",
-      m_me, &args->clientid(), args->requestid(), m_me, &op.Key, raftIndex);
+      "[func -KvServer::PutAppend -kvserver{%d}] From Client %s (Request %d) "
+      "To "
+      "Server %d, key %s, raftIndex %d, is leader",
+      m_me, args->clientid().c_str(), args->requestid(), m_me, op.Key.c_str(),
+      raftIndex);
   m_mtx.lock();
   if (waitApplyCh.find(raftIndex) == waitApplyCh.end()) {
     waitApplyCh.insert(std::make_pair(raftIndex, new LockQueue<Op>()));
@@ -185,11 +187,11 @@ void KvServer::PutAppend(const raftKVRpcProctoc::PutAppendArgs* args,
   Op raftCommitOp;
   if (!chForRaftIndex->timeOutPop(CONSENSUS_TIMEOUT, &raftCommitOp)) {
     DPrintf(
-        "[func -KvServer::PutAppend -kvserver{%d}]TIMEOUT PUTAPPEND !!!! "
-        "Server %d , get Command <-- Index:%d , ClientId %s, RequestId %s, "
+        "[func -KvServer::PutAppend -kvserver{%d}] TIMEOUT PUTAPPEND !!!! "
+        "Server %d, get Command <-- Index:%d , ClientId %s, RequestId %d, "
         "Opreation %s Key :%s, Value :%s",
-        m_me, m_me, raftIndex, &op.ClientId, op.RequestId, &op.Operation,
-        &op.Key, &op.Value);
+        m_me, m_me, raftIndex, op.ClientId, op.RequestId, op.Operation, op.Key,
+        op.Value);
     // 判断RequestId是否过时
     if (ifRequestDuplicate(op.ClientId, op.RequestId)) {
       reply->set_err(OK);
@@ -199,11 +201,11 @@ void KvServer::PutAppend(const raftKVRpcProctoc::PutAppendArgs* args,
   } else {
     DPrintf(
         "[func -KvServer::PutAppend "
-        "-kvserver{%d}]WaitChanGetRaftApplyMessage<--Server %d , get Command "
-        "<-- Index:%d , ClientId %s, RequestId %d, Opreation %s, Key :%s, "
-        "Value :%s",
-        m_me, m_me, raftIndex, &op.ClientId, op.RequestId, &op.Operation,
-        &op.Key, &op.Value);
+        "-kvserver{%d}] WaitChanGetRaftApplyMessage<--Server %d, get Command "
+        "<-- Index:%d , ClientId %s, RequestId %d, Opreation %s, Key: %s, "
+        "Value: %s",
+        m_me, m_me, raftIndex, op.ClientId.c_str(), op.RequestId,
+        op.Operation.c_str(), op.Key.c_str(), op.Value.c_str());
     if (raftCommitOp.ClientId == op.ClientId &&
         raftCommitOp.RequestId == op.RequestId) {
       // 可能发生leader的变更导致日志被覆盖，因此需要检查
@@ -226,8 +228,8 @@ void KvServer::ReadRaftApplyCommandLoop() {
     // 如果只操作applyChan不用拿锁，因为applyChan自己带锁
     auto message = applyChan->Pop();
     DPrintf(
-        "---------------tmp-------------[func-KvServer::"
-        "ReadRaftApplyCommandLoop()-kvserver{%d}] 收到了下raft的消息",
+        "[func-KvServer::ReadRaftApplyCommandLoop()-kvserver{%d}] "
+        "收到了下raft的消息",
         m_me);
     if (message.CommandValid) {
       GetCommandFromRaft(message);
@@ -249,23 +251,16 @@ void KvServer::ReadSnapShotToInstall(std::string snapshot) {
 
 bool KvServer::SendMessageToWaitChan(const Op& op, int raftIndex) {
   std::lock_guard<std::mutex> lg(m_mtx);
-  DPrintf(
-      "[RaftApplyMessageSendToWaitChan--> raftserver{%d}] , Send Command --> "
-      "Index:{%d} , ClientId {%d}, RequestId {%d}, Opreation {%v}, Key :{%v}, "
-      "Value :{%v}",
-      m_me, raftIndex, &op.ClientId, op.RequestId, &op.Operation, &op.Key,
-      &op.Value);
-
   if (waitApplyCh.find(raftIndex) == waitApplyCh.end()) {
     return false;
   }
-  waitApplyCh[raftIndex]->Push(op);
   DPrintf(
       "[RaftApplyMessageSendToWaitChan--> raftserver{%d}] , Send Command --> "
-      "Index:{%d} , ClientId {%d}, RequestId {%d}, Opreation {%v}, Key :{%v}, "
-      "Value :{%v}",
-      m_me, raftIndex, &op.ClientId, op.RequestId, &op.Operation, &op.Key,
-      &op.Value);
+      "Index:{%d} , ClientId {%s}, RequestId {%d}, Opreation {%s}, Key :{%s}, "
+      "Value :{%s}",
+      m_me, raftIndex, op.ClientId.c_str(), op.RequestId, op.Operation.c_str(),
+      op.Key.c_str(), op.Value.c_str());
+  waitApplyCh[raftIndex]->Push(op);
   return true;
 }
 
@@ -329,7 +324,7 @@ KvServer::KvServer(int me, int maxraftstate, std::string nodeInforFilename,
   std::cout << "raftServer node:" << m_me
             << " start to sleep to wait all ohter raftnode start!!!!"
             << std::endl;
-  sleep(6);
+  sleep(3);
   std::cout << "raftServer node:" << m_me
             << " wake up!!!! start to connect other raftnode" << std::endl;
 
