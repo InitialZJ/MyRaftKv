@@ -4,6 +4,11 @@
 
 ## 依赖库安装
 
+首先安装一些必要组件
+```bash
+sudo apt install unzip autoconf libtool libboost-dev zlib1g-dev
+```
+
 ### CMake
 
 因为要使用c++20标准，所以需要高版本的CMake支持，我是用的版本是3.22。因为apt源没有这么高的版本，需要从其他地方安装，执行以下命令
