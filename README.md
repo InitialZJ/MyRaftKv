@@ -6,7 +6,7 @@
 
 首先安装一些必要组件
 ```bash
-sudo apt install unzip autoconf libtool libboost-dev zlib1g-dev
+sudo apt install unzip autoconf libtool libboost-dev zlib1g-dev libboost-serialization-dev
 ```
 
 ### CMake
